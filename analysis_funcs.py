@@ -75,7 +75,7 @@ def make_RMSE_df(trial_set,true_column = "Ground Truth"):
         edge_df = make_edge_df(tr)
         rmse = calculate_RMSE(edge_df)
         rmse_df.loc[ky] = rmse.loc[true_column,fit_methods_li]
-    return rmse_df
+    return rmse_df.astype(float)
 
 def make_XK_RMSE_df(trial_set,splits,true_column = "Ground Truth"):
     fit_methods_li = ["Log-Covariance","CLR-Mixed","CLR-Split","SparCC","GLASSO-Mixed","GLASSO-Split"]
@@ -84,7 +84,7 @@ def make_XK_RMSE_df(trial_set,splits,true_column = "Ground Truth"):
         edge_df = make_XK_edge_df(tr,splits.loc[ky,0])
         rmse = calculate_RMSE(edge_df)
         rmse_df.loc[ky] = rmse.loc[true_column,fit_methods_li]
-    return rmse_df
+    return rmse_df.astype(float)
 
 def calculate_coeff_det(df,cutoff = 0,cutoff_method = "zero"):
     dfcols = pd.DataFrame(columns=df.columns)
@@ -106,7 +106,7 @@ def make_coeff_det_df(trial_set,true_column = "Ground Truth",cutoff = 0,cutoff_m
         edge_df = make_edge_df(tr)
         rsqrd = calculate_coeff_det(edge_df,cutoff=cutoff,cutoff_method=cutoff_method)
         rsqrd_df.loc[ky] = rsqrd.loc[true_column,fit_methods_li]
-    return rsqrd_df
+    return rsqrd_df.astype(float)
 
 def make_XK_coeff_det_df(trial_set,splits,true_column = "Ground Truth",cutoff = 0,cutoff_method = "zero"):
     fit_methods_li = ["Log-Covariance","CLR-Mixed","CLR-Split","SparCC","GLASSO-Mixed","GLASSO-Split"]
@@ -115,7 +115,7 @@ def make_XK_coeff_det_df(trial_set,splits,true_column = "Ground Truth",cutoff = 
         edge_df = make_XK_edge_df(tr,splits.loc[ky,0])
         rsqrd = calculate_coeff_det(edge_df,cutoff = cutoff,cutoff_method=cutoff_method)
         rsqrd_df.loc[ky] = rsqrd.loc[true_column,fit_methods_li]
-    return rsqrd_df
+    return rsqrd_df.astype(float)
 
 def topN_accuracy(edge_df,N):
     fit_methods_li = ["Log-Covariance","CLR-Mixed","CLR-Split","SparCC","GLASSO-Mixed","GLASSO-Split"]

@@ -126,9 +126,10 @@ def proj(v1,v2):
     else:
         return v1*0
 
-def rand_in_perp(S,mxvars = 1,minvars = 0.5):
+def rand_in_perp(S,mxvars = 1,minvars = 0.5,bias = 0,pos = None,neg = None):
 
-    """Find a random vector perpendicular to a given set of vectors. L2 norm of the vector will be chosen randomly in (minvars,mxvars)
+    """Find a random vector perpendicular to a given set of vectors. L2 norm of the vector will be chosen randomly in (minvars,mxvars). Additionally can 
+    choose in or near the dual cone to a set of vectors.
 
     :param S: Vectors (as rows) that new vector should be perpendicular to
     :type S: np.array
@@ -136,24 +137,96 @@ def rand_in_perp(S,mxvars = 1,minvars = 0.5):
     :param mxvars: maximum scale of vector
     :type mxvars: float
 
-
     :param minvars: minimum scale of vector
     :type minvars: float
+
+    :param bias: Extent to bias towards a dual cone. 1 chooses from dual cone, <1 chooses ``close to" the dual cone, 0 does not use the dual cone.
+    :type bias: float
+
+    :param pos: set of vectors for which result will have positive dot product (or biased towards)
+    :type pos: np.array
+    
+    :param neg: set of vectors for which result will have negative dot product (or biased towards)
+    :type neg: np.array
 
     :return: random vector
     :rtype: np.array
     """
 
-    if S.shape[0]:
+    if (hasattr(pos,"__len__") or hasattr(neg,"__len__")) and (bias !=0):
+        if (hasattr(pos,"__len__") and hasattr(neg,"__len__")):
+            K = np.concatenate([pos,-neg],axis = 0)
+        elif hasattr(pos,"__len__"):
+            K = pos
+        else:
+            K = -neg
+        ### K is the cone of vectors we want to biased towards positive dot product with. First we (may) need
+        #project on the null space of the S.
         #need an orthonormal basis perpendicular to the rows of S, i.e. ker(S)
-        NS = la.null_space(S)
-        #then pick a random vector from there.
-        r = np.dot(NS,np.random.rand(NS.shape[1]))
+        if S.shape[0]:
+            NS = la.null_space(S)
+        else:
+            NS = np.eye(S.shape[1])
+        #now project onto there....
+        #So we need a basis for S
+        SRng = la.orth(S.T)
+        SBasis = np.concatenate([SRng,NS],axis=1) 
+        ### And finally the projection:
+        K_S = la.solve(SBasis,K.T)
+        if K_S.shape[1]:
+            K_SPerp = K_S[SRng.shape[1]:]
+            ####Next we need a vector from K dual.
+            ### This is the vectors y such that K^Ty >= 0
+            ## so choose a positive vector (or close to it if the bias is not 1)
+            x = (np.random.rand(K_S.shape[1]) - 0.5) + bias/2
+            u = la.lstsq(K_SPerp.T,x)[0]
+            ### I guess add a random vector from the null space of K_SPerp.T
+            NSK = la.null_space(K_SPerp.T)
+            u = u + np.dot(NSK,np.random.rand(NSK.shape[1])) #I don't think these 2 lines are necessary...
+            r = np.dot(NS,u)
+            r = (minvars + (mxvars-minvars)*np.random.rand())*r/np.linalg.norm(r)
+        else:
+            #then pick a random vector from there.
+            r = np.dot(NS,np.random.rand(NS.shape[1])-0.5)
+            r = (minvars + (mxvars-minvars)*np.random.rand())*r/np.linalg.norm(r)
     else:
-        r = np.random.rand(S.shape[1]) - 0.5
-    return (minvars + (mxvars-minvars)*np.random.rand())*r/np.linalg.norm(r)
+        if S.shape[0]:
+            #need an orthonormal basis perpendicular to the rows of S, i.e. ker(S)
+            NS = la.null_space(S)
+            #then pick a random vector from there.
+            r = np.dot(NS,np.random.rand(NS.shape[1])-0.5)
+            r = (minvars + (mxvars-minvars)*np.random.rand())*r/np.linalg.norm(r)
+        else:
+            r = np.random.rand(S.shape[1]) - 0.5
+            r = (minvars + (mxvars-minvars)*np.random.rand())*r/np.linalg.norm(r)
+    return r
 
-def create_groundtruth_covariance(N,graphtype,sparsity,mxvars = 0.5,minvars = 0.4):
+def adjust_sparsity(sparse_adjust,shffld,spl_i):
+    inter_king = [shffld[spl_i[i]:spl_i[i+1],spl_i[i]:spl_i[i+1]].sum()/((spl_i[i+1] - spl_i[i])*((spl_i[i+1] - spl_i[i])-1)) for i in range(len(spl_i)-1)]
+    blk = shffld[spl_i[sparse_adjust["Kingdoms"][0]]:spl_i[sparse_adjust["Kingdoms"][0]+1],spl_i[sparse_adjust["Kingdoms"][1]]:spl_i[sparse_adjust["Kingdoms"][1]+1]]
+    blk_size = blk.size
+    desired_sparsity = np.mean(inter_king)*sparse_adjust["SparsityRatio"]
+    desired_edges = blk_size*desired_sparsity
+    current_edges = blk.sum()
+    if sparse_adjust["SparsityRatio"] < 1:
+        nz = np.where(blk != 0)
+        keep = np.random.choice(nz[0].size,size = int(desired_edges),replace = False)
+        keep_coords = (nz[0][keep],nz[1][keep])
+        newblk = np.zeros_like(blk)
+        newblk[keep_coords] = 1.0
+        shffld[spl_i[sparse_adjust["Kingdoms"][0]]:spl_i[sparse_adjust["Kingdoms"][0]+1],spl_i[sparse_adjust["Kingdoms"][1]]:spl_i[sparse_adjust["Kingdoms"][1]+1]] = newblk
+        shffld[spl_i[sparse_adjust["Kingdoms"][1]]:spl_i[sparse_adjust["Kingdoms"][1]+1],spl_i[sparse_adjust["Kingdoms"][0]]:spl_i[sparse_adjust["Kingdoms"][0]+1]] = newblk.T
+    if sparse_adjust["SparsityRatio"] > 1:
+        zers = np.where(blk == 0)
+        add_in = np.random.choice(zers[0].size,size = int(desired_edges-current_edges),replace = False)
+        add_in_coords = (zers[0][add_in],zers[1][add_in])
+        newblk = blk.copy()
+        newblk[add_in_coords] = 1
+        shffld[spl_i[sparse_adjust["Kingdoms"][0]]:spl_i[sparse_adjust["Kingdoms"][0]+1],spl_i[sparse_adjust["Kingdoms"][1]]:spl_i[sparse_adjust["Kingdoms"][1]+1]] = newblk
+        shffld[spl_i[sparse_adjust["Kingdoms"][1]]:spl_i[sparse_adjust["Kingdoms"][1]+1],spl_i[sparse_adjust["Kingdoms"][0]]:spl_i[sparse_adjust["Kingdoms"][0]+1]] = newblk.T
+    return shffld
+
+def create_groundtruth_covariance(N,graphtype,sparsity,spl_i,mxvars = 0.5,minvars = 0.4,sparse_adjust = None,bias_str = 0, bias_blocks = None):
 
 
     """Creates a randomly chosen covariance matrix (symmetric, positive definite, full rank) with the same non-zero entry structure as the adjacency matrix of a random graph. Uses networkX graph generators. 
@@ -170,6 +243,12 @@ def create_groundtruth_covariance(N,graphtype,sparsity,mxvars = 0.5,minvars = 0.
     :type mxvars: float
     :param minvars: minimum range of variance (diagonal entries)
     :type minvars: float
+    :param sparse_adjust: How to adjust sparsity of different blocks
+    :type sparse_adjust: dict
+    :param bias_blocks: Details of how to bias the interactions by blocks. List of [(i,j,+/-1)] with i<j
+    :type bias_blocks: list
+    :param bias_str: strength of biases. 1 is always true, 0 is no bias.
+    :type bias_str: float
 
     :return: _description_
     :rtype: _type_
@@ -195,15 +274,60 @@ def create_groundtruth_covariance(N,graphtype,sparsity,mxvars = 0.5,minvars = 0.
     Adj = nx.to_numpy_array(graph)
     sh = np.random.permutation(N)
     shffld = Adj[sh][:,sh]
-    
+
+    if isinstance(sparse_adjust,dict):
+        shffld = adjust_sparsity(sparse_adjust,shffld,spl_i)
 
     Sp = shffld.sum()/(N*(N-1))
 
     Q = (minvars + (mxvars-minvars))*np.random.rand()*np.eye(N)
 
     print("[create_groundtruth_covariance] Generating cholesky decomposition")
-    for i in tqdm(range(1,N)):
-        Q[i] = rand_in_perp(Q[:i][~shffld[i,:i].astype(bool)],mxvars = mxvars,minvars = minvars)
+
+    if not hasattr(bias_blocks,"__len__"):
+        bias_blocks = []
+
+    for j in range(0,len(spl_i)-1):
+
+        pos_blks = [Q[spl_i[k]:spl_i[k+1]] for k in range(j) if (k,j,1) in bias_blocks]
+        if len(pos_blks):
+            full_pos = np.concatenate(pos_blks,axis = 0)
+            pos_pattern = np.concatenate([shffld[:,spl_i[k]:spl_i[k+1]] for k in range(j) if (k,j,1) in bias_blocks],axis = 1)
+        else:
+            full_pos = np.array([])
+        
+        neg_blks = [Q[spl_i[k]:spl_i[k+1]] for k in range(j) if (k,j,-1) in bias_blocks]
+        if len(neg_blks):
+            full_neg = np.concatenate(neg_blks,axis = 0)
+            neg_pattern = np.concatenate([shffld[:,spl_i[k]:spl_i[k+1]] for k in range(j) if (k,j,-1) in bias_blocks],axis = 1)
+        else:
+            full_neg = np.array([])
+    
+
+        for i in tqdm(range(spl_i[j],spl_i[j+1])):
+            if (j,j,1) in bias_blocks:
+                if len(pos_blks):
+                    full_pos = np.concatenate([full_pos,Q[spl_i[j]:i]])
+                    pos_pattern = np.concatenate([pos_pattern,shffld[:,spl_i[j]:i]],axis = 1)
+                else:
+                    full_pos = Q[spl_i[j]:i]
+                    pos_pattern = shffld[:,spl_i[j]:i]
+            elif (j,j,-1) in bias_blocks:
+                if len(neg_blks):
+                    full_neg = np.concatenate([full_neg,Q[spl_i[j]:i]])
+                    neg_pattern = np.concatenate([neg_pattern,shffld[:,spl_i[j]:i]],axis = 1)
+                else:
+                    full_neg = Q[spl_i[j]:i]
+                    neg_pattern = shffld[:,spl_i[j]:i]
+            if full_pos.shape[0]:
+                pcone = full_pos[pos_pattern[i].astype(bool)]
+            else:
+                pcone = None
+            if full_neg.shape[0]:
+                ncone = full_neg[neg_pattern[i].astype(bool)]
+            else:
+                ncone = None
+            Q[i] = rand_in_perp(Q[:i][~shffld[i,:i].astype(bool)],mxvars = mxvars,minvars = minvars,bias = bias_str, pos = pcone,neg = ncone)
 
     covar = np.dot(Q,Q.T)
 
@@ -312,6 +436,9 @@ def generate_synthetic_data(num_taxa,num_samples,**kwargs):
     :param average_read_depth: Average sequencing depth
     :param std_of_read_depth: Std. of sequencing depth
     :param simulate_reads_tasks: number of parallel jobs for simulating reads
+    :param truth_sparsity_adjustment: how to adjust sparsity in blocks (in kingdoms or across)
+    :param truth_bias_strength: strength of sign bias
+    :param truth_bias_structure: structure of sign bias in blocks
 
     :type sparsity: float
     :type graph_model: str
@@ -333,19 +460,27 @@ def generate_synthetic_data(num_taxa,num_samples,**kwargs):
     graphtype = kwargs.get("graph_model","PL")
     mxvar = kwargs.get("max_variance",0.5)
     minvar = kwargs.get("min_variance",0.4)
-
+    mean_lr = kwargs.get("mean_log_range",1)
+    mean_lc = kwargs.get("mean_log_center",0)
+    sparse_adjust = kwargs.get("truth_sparsity_adjustment",None)
+    b_str = kwargs.get("truth_bias_strength",0)
+    b_blocks = kwargs.get("truth_bias_structure",None)
     
+    num_types = kwargs.get("data_types",1)
+    minsplit = int(0.2*num_taxa)
+    maxsplit = int(0.8*num_taxa)
+    splits = np.sort(np.random.choice(range(minsplit,maxsplit),size = num_types-1,replace = False))
+
+    spl_i = np.concatenate([[0],splits,[num_taxa]])
 
     nmtry = 0
     giveup = 10
     covar_matrix = np.zeros((num_taxa,num_taxa))
     covar_matrix_done = False
     while not covar_matrix_done:
-        covar_matrix, actual_sparsity = create_groundtruth_covariance(num_taxa,graphtype,sparsity,mxvars=mxvar,minvars=minvar)
+        covar_matrix, actual_sparsity = create_groundtruth_covariance(num_taxa,graphtype,sparsity,spl_i,mxvars=mxvar,minvars=minvar,bias_blocks=b_blocks,bias_str=b_str,sparse_adjust = sparse_adjust)
 
-        mean_lr = kwargs.get("mean_log_range",1)
-        mean_lc = kwargs.get("mean_log_center",0)
-        num_types = kwargs.get("data_types",1)
+
 
         absolute_samples,covar_matrix_done = generate_synthetic_samples(num_samples,covar_matrix,mean_log_range=mean_lr,mean_log_center=mean_lc)
 
@@ -364,13 +499,6 @@ def generate_synthetic_data(num_taxa,num_samples,**kwargs):
     std_dpth = kwargs.get("std_of_read_depth",1000)
 
     simr_nj = kwargs.get("simulate_reads_tasks",1)
-    
-
-    minsplit = int(0.2*num_taxa)
-    maxsplit = int(0.8*num_taxa)
-    splits = np.sort(np.random.choice(range(minsplit,maxsplit),size = num_types-1,replace = False))
-
-    spl_i = np.concatenate([[0],splits,[num_taxa]])
 
     read_depths = {}
     
