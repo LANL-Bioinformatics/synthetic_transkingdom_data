@@ -126,7 +126,7 @@ def proj(v1,v2):
     else:
         return v1*0
 
-def rand_in_perp(S,mxvars = 1,minvars = 0.5,bias = 0,pos = None,neg = None):
+def rand_in_perp_old(S,mxvars = 1,minvars = 0.5,bias = 0,pos = None,neg = None):
 
     """Find a random vector perpendicular to a given set of vectors. L2 norm of the vector will be chosen randomly in (minvars,mxvars). Additionally can 
     choose in or near the dual cone to a set of vectors.
@@ -155,28 +155,34 @@ def rand_in_perp(S,mxvars = 1,minvars = 0.5,bias = 0,pos = None,neg = None):
 
     if (hasattr(pos,"__len__") or hasattr(neg,"__len__")) and (bias !=0):
         if (hasattr(pos,"__len__") and hasattr(neg,"__len__")):
+            # print(pos.shape)
+            # print(neg.shape)
             K = np.concatenate([pos,-neg],axis = 0)
         elif hasattr(pos,"__len__"):
+            # print("pos",pos.shape)
             K = pos
         else:
+            # print("neg",neg.shape)
             K = -neg
-        ### K is the cone of vectors we want to biased towards positive dot product with. First we (may) need
+        ### Rows of K is the cone of vectors we want to biased towards positive dot product with. First we (may) need
         #project on the null space of the S.
         #need an orthonormal basis perpendicular to the rows of S, i.e. ker(S)
         if S.shape[0]:
             NS = la.null_space(S)
+            #now project onto there....
+            #So we need a basis for S
+            SRng = la.orth(S.T)
+            SBasis = np.concatenate([SRng,NS],axis=1) 
         else:
             NS = np.eye(S.shape[1])
-        #now project onto there....
-        #So we need a basis for S
-        SRng = la.orth(S.T)
-        SBasis = np.concatenate([SRng,NS],axis=1) 
+            SRng = np.array([[]])
+            SBasis = NS
         ### And finally the projection:
         K_S = la.solve(SBasis,K.T)
         if K_S.shape[1]:
-            K_SPerp = K_S[SRng.shape[1]:]
+            K_SPerp = K_S[SRng.shape[1]:]#the final N-S components are the coordinates in S^Perp
             ####Next we need a vector from K dual.
-            ### This is the vectors y such that K^Ty >= 0
+            ### This is the vectors y such that Ky >= 0
             ## so choose a positive vector (or close to it if the bias is not 1)
             x = (np.random.rand(K_S.shape[1]) - 0.5) + bias/2
             u = la.lstsq(K_SPerp.T,x)[0]
@@ -200,6 +206,88 @@ def rand_in_perp(S,mxvars = 1,minvars = 0.5,bias = 0,pos = None,neg = None):
             r = np.random.rand(S.shape[1]) - 0.5
             r = (minvars + (mxvars-minvars)*np.random.rand())*r/np.linalg.norm(r)
     return r
+
+def rand_in_perp(S,mxvars = 1,minvars = 0.5,bias = 0,pos = None,neg = None,maxit = 0):
+
+    """Find a random vector perpendicular to a given set of vectors. L2 norm of the vector will be chosen randomly in (minvars,mxvars). Additionally can 
+    choose in or near the dual cone to a set of vectors.
+
+    :param S: Vectors (as rows) that new vector should be perpendicular to
+    :type S: np.array
+
+    :param mxvars: maximum scale of vector
+    :type mxvars: float
+
+    :param minvars: minimum scale of vector
+    :type minvars: float
+
+    :param bias: Extent to bias towards a dual cone. 1 chooses from dual cone, <1 chooses ``close to" the dual cone, 0 does not use the dual cone.
+    :type bias: float
+
+    :param pos: set of vectors for which result will have positive dot product (or biased towards)
+    :type pos: np.array
+    
+    :param neg: set of vectors for which result will have negative dot product (or biased towards)
+    :type neg: np.array
+
+    :param maxit: Number of iterations to attempt to find vector in cone before giving up.
+    :type maxit: int
+
+    :return: random vector
+    :rtype: np.array
+    """
+
+    if (hasattr(pos,"__len__") or hasattr(neg,"__len__")) and (bias !=0):
+        if (hasattr(pos,"__len__") and hasattr(neg,"__len__")):
+            # print(pos.shape)
+            # print(neg.shape)
+            K = np.concatenate([pos,-neg],axis = 0)
+        elif hasattr(pos,"__len__"):
+            # print("pos",pos.shape)
+            K = pos
+        else:
+            # print("neg",neg.shape)
+            K = -neg
+        ### Rows of K is the cone of vectors we want to biased towards positive dot product with. First we (may) need
+        #project on the null space of the S.
+        #need an orthonormal basis perpendicular to the rows of S, i.e. ker(S)
+        if S.shape[0]:
+            NS = la.null_space(S)
+        else:
+            NS = np.eye(S.shape[1])
+        KNS = np.dot(K,NS)
+        KNS_nullspace = la.null_space(KNS)
+        if KNS_nullspace.shape[1]:
+            x = 2*np.random.rand(K.shape[0]) - 1 + bias #if bias == 1, nonnegative. If bias = 0, in [-1,1]
+            u = la.lstsq(KNS,x)[0]#
+            stop = 0
+            while la.norm(np.dot(KNS,u) - x) > 10**-10:
+                x = 2*np.random.rand(K.shape[0]) - 1 + bias #if bias == 1, nonnegative. If bias = 0, in [-1,1]
+                u = la.lstsq(KNS,x)[0]#
+                stop += 1
+                if stop > maxit:
+                    u = 2*np.random.rand(NS.shape[1]) - 1
+                    break
+            ubar = np.dot(KNS_nullspace,np.random.rand(KNS_nullspace.shape[1])-0.5) # add on a vector in the null space of KNS. Resulting u should satisfy (K*NS)u >= 0.
+            if la.norm(np.dot(NS,ubar)):
+                u = u + ubar#otherwise its not doing anything anyway
+        else:#if there is only going to be one or no solution in the projected cone.
+            # print("No or single solution in projection of cone")
+            u = 2*np.random.rand(NS.shape[1]) - 1
+        r = np.dot(NS,u) 
+        r = (minvars + (mxvars-minvars)*np.random.rand())*r/np.linalg.norm(r)
+    else:
+        if S.shape[0]:
+            #need an orthonormal basis perpendicular to the rows of S, i.e. ker(S)
+            NS = la.null_space(S)
+            #then pick a random vector from there.
+            r = np.dot(NS,np.random.rand(NS.shape[1])-0.5)# in [-1/2,1/2]
+            r = (minvars + (mxvars-minvars)*np.random.rand())*r/np.linalg.norm(r)
+        else:
+            r = np.random.rand(S.shape[1]) - 0.5
+            r = (minvars + (mxvars-minvars)*np.random.rand())*r/np.linalg.norm(r)
+    return r
+
 
 def adjust_sparsity(sparse_adjust,shffld,spl_i):
     inter_king = [shffld[spl_i[i]:spl_i[i+1],spl_i[i]:spl_i[i+1]].sum()/((spl_i[i+1] - spl_i[i])*((spl_i[i+1] - spl_i[i])-1)) for i in range(len(spl_i)-1)]
@@ -226,7 +314,7 @@ def adjust_sparsity(sparse_adjust,shffld,spl_i):
         shffld[spl_i[sparse_adjust["Kingdoms"][1]]:spl_i[sparse_adjust["Kingdoms"][1]+1],spl_i[sparse_adjust["Kingdoms"][0]]:spl_i[sparse_adjust["Kingdoms"][0]+1]] = newblk.T
     return shffld
 
-def create_groundtruth_covariance(N,graphtype,sparsity,spl_i,mxvars = 0.5,minvars = 0.4,sparse_adjust = None,bias_str = 0, bias_blocks = None):
+def create_groundtruth_covariance(N,graphtype,sparsity,spl_i,mxvars = 0.5,minvars = 0.4,sparse_adjust = None,bias_str = 0, bias_blocks = None,ranksafe = 0):
 
 
     """Creates a randomly chosen covariance matrix (symmetric, positive definite, full rank) with the same non-zero entry structure as the adjacency matrix of a random graph. Uses networkX graph generators. 
@@ -249,6 +337,8 @@ def create_groundtruth_covariance(N,graphtype,sparsity,spl_i,mxvars = 0.5,minvar
     :type bias_blocks: list
     :param bias_str: strength of biases. 1 is always true, 0 is no bias.
     :type bias_str: float
+    :param ranksafe: weight to add in vectors from space perpendicular to previous vectors to insure matrix is full rank.
+    :type ranksafe: float
 
     :return: _description_
     :rtype: _type_
@@ -328,7 +418,13 @@ def create_groundtruth_covariance(N,graphtype,sparsity,spl_i,mxvars = 0.5,minvar
             else:
                 ncone = None
             Q[i] = rand_in_perp(Q[:i][~shffld[i,:i].astype(bool)],mxvars = mxvars,minvars = minvars,bias = bias_str, pos = pcone,neg = ncone)
+            if ranksafe:
+                r2 = rand_in_perp(Q[:i],mxvars = mxvars,minvars = minvars,bias = bias_str, pos = pcone,neg = ncone)
+                Q[i] = Q[i] + ranksafe*r2
+            
 
+    if Q.shape[0]!=Q.shape[1]:
+        print("[create_groundtruth_covariance] ERROR: Did not choose enough vectors in cholesky decomposition. Size is {}".format(Q.shape))
     covar = np.dot(Q,Q.T)
 
     return covar,Sp
@@ -478,11 +574,14 @@ def generate_synthetic_data(num_taxa,num_samples,**kwargs):
     covar_matrix = np.zeros((num_taxa,num_taxa))
     covar_matrix_done = False
     while not covar_matrix_done:
-        covar_matrix, actual_sparsity = create_groundtruth_covariance(num_taxa,graphtype,sparsity,spl_i,mxvars=mxvar,minvars=minvar,bias_blocks=b_blocks,bias_str=b_str,sparse_adjust = sparse_adjust)
+        covar_matrix, actual_sparsity = create_groundtruth_covariance(num_taxa,graphtype,sparsity,spl_i,mxvars=mxvar,minvars=minvar,bias_blocks=b_blocks,bias_str=b_str,sparse_adjust = sparse_adjust,ranksafe=nmtry)
 
+        if np.min(np.linalg.svd(covar_matrix)[1]).round(5):
 
-
-        absolute_samples,covar_matrix_done = generate_synthetic_samples(num_samples,covar_matrix,mean_log_range=mean_lr,mean_log_center=mean_lc)
+            absolute_samples,covar_matrix_done = generate_synthetic_samples(num_samples,covar_matrix,mean_log_range=mean_lr,mean_log_center=mean_lc)
+        
+        else:
+            print("Singular Matrix. Matrix smallest singular value is {}.".format(np.min(np.linalg.svd(covar_matrix)[1])))
 
         nmtry += 1
         if nmtry == giveup:
