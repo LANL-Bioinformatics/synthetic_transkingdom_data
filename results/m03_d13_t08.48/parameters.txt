@@ -1,0 +1,20 @@
+N (number of taxa): 500
+M (number of samples): 150
+lam: 0.3 (LASSO parameter lambda for GLASSO)
+ch: 0 (chunkiness for NormalCowboy)
+ns: 2 (Number of simualted data types)
+gsp: 0.05 (approximate sparsity of ground truth)
+norms: add_pseudocounts (how count data is normalized by the method)
+grmod: PL (which graph model to base ground truth on)
+mean_spread: 4 (spread of log-means of absolute abundances)
+mean_center: 0 (center of uniform distrubition of log-means of absolute abundances)
+L (number of trials): 20
+mxvar: 2 (Max variance of absuolute abundances)
+mnvar: 0.3 (Min variance of absuolute abundances)
+hubcut (eigenvector centrality cutoff to consider a node a hub for comparison between networks): 0.3
+average read depth: 100000
+Standard deviation of read depth: 10000
+Use Correlation (instead of covariance): False
+Sparsity Structure Adjustment: None
+Block sign bias structure: [(0, 1, 1)]
+Sign Bias Strength: 0.9
